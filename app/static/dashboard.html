@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fulfillment Dashboard</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e2dc; --field:#fff;
+          --accent:#1d4ed8; --accent-ink:#fff; --stat:#b42318; --urgent:#b54708; --routine:#475467;
+          --ok:#067647; --down:#b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141413; --panel:#1f1f1d; --ink:#ecebe6; --muted:#9a9993; --line:#33332f; --field:#171716;
+            --accent:#4f7cff; --accent-ink:#fff; --stat:#f97066; --urgent:#fdb022; --routine:#98a2b3;
+            --ok:#47cd89; --down:#f97066; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding:20px 16px 8px; max-width:1200px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .note { color:var(--muted); font-size:12px; }
+  main { max-width:1200px; margin:0 auto; padding:8px 16px 32px;
+         display:grid; gap:16px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { main { grid-template-columns: 380px 1fr; } .span { grid-column: 1 / -1; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; min-width:0; }
+  h2 { font-size:14px; margin:0 0 10px; display:flex; justify-content:space-between; align-items:center; }
+  h3 { font-size:12px; color:var(--muted); font-weight:600; margin:0 0 8px; text-transform:uppercase; letter-spacing:.04em; }
+  .controls { display:grid; gap:16px; grid-template-columns:1fr; }
+  @media (min-width: 900px) { .controls { grid-template-columns: 1.4fr 1fr; } }
+  form { display:flex; flex-wrap:wrap; gap:8px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+  select, input { font:inherit; color:var(--ink); background:var(--field); border:1px solid var(--line);
+                  border-radius:6px; padding:6px 8px; min-width:0; }
+  #drug { width:min(340px, 100%); }
+  #qty { width:90px; }
+  button { font:inherit; border:1px solid var(--line); background:var(--field); color:var(--ink);
+           border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button:hover { border-color:var(--muted); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  button:disabled { opacity:.5; cursor:wait; }
+  button.small { padding:2px 8px; font-size:12px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .counts { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:12px; font-size:12px; color:var(--muted); }
+  .counts b { color:var(--ink); font-weight:600; }
+  #log { margin-top:10px; font-size:12px; color:var(--muted); min-height:1.45em; }
+  #log.error { color:var(--down); }
+  .station { padding:8px 0; border-top:1px solid var(--line); }
+  .station:first-of-type { border-top:0; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .bar { height:6px; background:var(--line); border-radius:3px; margin-top:6px; overflow:hidden; }
+  .bar > span { display:block; height:100%; background:var(--ok); }
+  .down { color:var(--down); font-weight:600; }
+  .active { color:var(--ok); font-weight:600; }
+  .forms { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-top:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; font-size:12px; border-top:0; }
+  .wrap { overflow-x:auto; }
+  .p-STAT { color:var(--stat); font-weight:600; }
+  .p-URGENT { color:var(--urgent); font-weight:600; }
+  .p-ROUTINE { color:var(--routine); }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fulfillment floor</h1>
+  <div class="note">Learning project, not for clinical use. Synthetic patients, real FDA NDC drug data.
+    Refreshes every 3 seconds. <span id="updated"></span> Full API: <a href="/docs">/docs</a></div>
+</header>
+<main>
+  <section class="span">
+    <div class="controls">
+      <div>
+        <h3>New order</h3>
+        <form id="order-form">
+          <label>Drug <select id="drug" required></select></label>
+          <label>Quantity <input id="qty" type="number" min="1" max="10000" value="30" required></label>
+          <label>Priority
+            <select id="priority"><option>ROUTINE</option><option>URGENT</option><option>STAT</option></select>
+          </label>
+          <button class="primary" type="submit">Create order</button>
+          <button type="button" id="random-orders">Add 20 random orders</button>
+        </form>
+      </div>
+      <div>
+        <h3>Move work through the floor</h3>
+        <div class="actions">
+          <button id="queue-received" title="RECEIVED orders: VALIDATED then QUEUED (short stock goes ON_HOLD)">1. Validate and queue</button>
+          <button id="dispatch" title="POST /queue/dispatch">2. Dispatch to stations</button>
+          <button id="finish" title="FILLING orders: VERIFIED (as pharmacist) then SHIPPED">3. Verify and ship fills</button>
+        </div>
+      </div>
+    </div>
+    <div class="counts" id="counts"></div>
+    <div id="log"></div>
+  </section>
+  <section><h2>Stations <span id="station-count" class="muted"></span></h2><div id="stations"></div></section>
+  <section><h2>Queue <span id="queue-count" class="muted"></span></h2>
+    <div class="wrap"><table>
+      <thead><tr><th>#</th><th>Order</th><th>Priority</th><th>Due</th><th>Drug</th><th>Form</th><th>Qty</th></tr></thead>
+      <tbody id="queue"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const STATUSES = ["RECEIVED", "VALIDATED", "QUEUED", "FILLING", "VERIFIED", "SHIPPED", "ON_HOLD", "CANCELLED"];
+const QTY = { TABLET:[30,60,90], CAPSULE:[30,60,90], LIQUID:[100,150,200], INJECTABLE:[3,9,15],
+              TOPICAL:[15,30,45], INHALER:[1,2,3], OTHER:[1] };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+let drugs = [];
+
+function log(message, isError = false) {
+  const el = document.getElementById("log");
+  el.textContent = message;
+  el.className = isError ? "error" : "";
+}
+
+async function api(method, path, body, headers = {}) {
+  const res = await fetch(path, {
+    method, headers: { "content-type": "application/json", ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ? data.error.message : res.statusText);
+  return data;
+}
+
+async function allOrders(status) {
+  const out = [];
+  for (let offset = 0; ; offset += 200) {
+    const page = await api("GET", `/orders?status=${status}&limit=200&offset=${offset}`);
+    out.push(...page.items);
+    if (offset + 200 >= page.total) return out;
+  }
+}
+
+async function busy(button, work) {
+  button.disabled = true;
+  try { await work(); } catch (e) { log(e.message, true); }
+  finally { button.disabled = false; refresh(); }
+}
+
+function randomPatient() {
+  return "PT-" + String(Math.floor(Math.random() * 1e8)).padStart(8, "0");
+}
+
+async function loadDrugs() {
+  const items = await api("GET", "/inventory");
+  drugs = items.map(i => i.drug);
+  document.getElementById("drug").innerHTML = items.map(i =>
+    `<option value="${esc(i.drug.ndc)}">${esc(i.drug.name)} ${esc(i.drug.strength)} (${i.drug.dosage_form}, ${i.quantity_on_hand} on hand)</option>`
+  ).join("");
+}
+
+document.getElementById("order-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const button = e.submitter;
+  busy(button, async () => {
+    const order = await api("POST", "/orders", {
+      patient_ref: randomPatient(),
+      drug_ndc: document.getElementById("drug").value,
+      quantity: Number(document.getElementById("qty").value),
+      priority: document.getElementById("priority").value,
+    });
+    log(`Created order #${order.id} (${order.priority}). Now click "1. Validate and queue".`);
+  });
+});
+
+document.getElementById("random-orders").addEventListener("click", e => busy(e.target, async () => {
+  const weights = ["STAT", "URGENT", "URGENT", "ROUTINE", "ROUTINE", "ROUTINE", "ROUTINE", "ROUTINE"];
+  for (let i = 0; i < 20; i++) {
+    const drug = pick(drugs);
+    await api("POST", "/orders", { patient_ref: randomPatient(), drug_ndc: drug.ndc,
+                                   quantity: pick(QTY[drug.dosage_form]), priority: pick(weights) });
+  }
+  log("Added 20 random orders (RECEIVED).");
+}));
+
+document.getElementById("queue-received").addEventListener("click", e => busy(e.target, async () => {
+  const orders = await allOrders("RECEIVED");
+  let queued = 0, held = 0;
+  for (const o of orders) {
+    const r = await api("POST", `/orders/${o.id}/transition`);
+    if (r.status === "VALIDATED") { await api("POST", `/orders/${o.id}/transition`); queued++; }
+    else held++;
+  }
+  log(`Validated ${orders.length} orders: ${queued} queued, ${held} on hold (not enough stock).`);
+}));
+
+document.getElementById("dispatch").addEventListener("click", e => busy(e.target, async () => {
+  const r = await api("POST", "/queue/dispatch");
+  log(`Dispatched ${r.assigned.length} orders to stations. ${r.held_order_ids.length} held for stock, ` +
+      `${r.remaining_queued} still queued (stations full or incompatible).`);
+}));
+
+document.getElementById("finish").addEventListener("click", e => busy(e.target, async () => {
+  const orders = await allOrders("FILLING");
+  for (const o of orders) {
+    await api("POST", `/orders/${o.id}/transition`, undefined, { "X-Role": "PHARMACIST" });
+    await api("POST", `/orders/${o.id}/transition`);
+  }
+  log(`Verified and shipped ${orders.length} orders. Station slots are free again: dispatch more.`);
+}));
+
+async function toggleStation(id, status) {
+  try {
+    const r = await api("PATCH", `/stations/${id}`, { status });
+    log(status === "DOWN"
+      ? `${r.station.name} is DOWN. ${r.requeued_order_ids.length} in-progress orders went back to the queue.`
+      : `${r.station.name} is ACTIVE again.`);
+  } catch (e) { log(e.message, true); }
+  refresh();
+}
+
+async function refresh() {
+  try {
+    const [stations, queue, ...pages] = await Promise.all([
+      api("GET", "/stations"), api("GET", "/queue"),
+      ...STATUSES.map(s => api("GET", `/orders?status=${s}&limit=1`))]);
+    document.getElementById("counts").innerHTML = STATUSES.map((s, i) =>
+      `<span>${s.replace("_", " ")}: <b>${pages[i].total}</b></span>`).join("");
+    document.getElementById("station-count").textContent = stations.length;
+    document.getElementById("stations").innerHTML = stations.map(s => `
+      <div class="station">
+        <div class="row"><strong>${esc(s.name)}</strong>
+          <span><span class="${s.status === "ACTIVE" ? "active" : "down"}">${s.status}</span>
+          <button class="small" onclick="toggleStation(${s.id}, '${s.status === "ACTIVE" ? "DOWN" : "ACTIVE"}')">
+            ${s.status === "ACTIVE" ? "Take down" : "Bring up"}</button></span></div>
+        <div class="row forms"><span>${s.supported_dosage_forms.join(", ")}</span>
+          <span>${s.current_load} / ${s.capacity}</span></div>
+        <div class="bar"><span style="width:${Math.round(100 * s.current_load / s.capacity)}%"></span></div>
+      </div>`).join("");
+    document.getElementById("queue-count").textContent = queue.length;
+    document.getElementById("queue").innerHTML = queue.slice(0, 100).map(q => `
+      <tr><td>${q.position}</td><td><a href="/orders/${q.order.id}" target="_blank">#${q.order.id}</a></td>
+        <td class="p-${q.order.priority}">${q.order.priority}</td>
+        <td>${new Date(q.order.due_by).toLocaleString()}</td>
+        <td>${esc(q.order.drug.name)} ${esc(q.order.drug.strength)}</td>
+        <td>${q.order.drug.dosage_form}</td><td>${q.order.quantity}</td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted">Queue is empty. Add orders, then click "1. Validate and queue".</td></tr>`;
+    document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString() + ".";
+  } catch (e) {
+    document.getElementById("updated").textContent = "Cannot reach the API.";
+  }
+}
+
+loadDrugs().catch(e => log(e.message, true));
+refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>

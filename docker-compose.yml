@@ -1,0 +1,23 @@
+# Runs PostgreSQL for local development. Start it with: docker compose up -d
+services:                       # each entry below is one container
+  db:                           # the service name; other containers could reach it at host "db"
+    image: postgres:16          # official PostgreSQL 16 image from Docker Hub
+    container_name: pharmacy-db # fixed name so `docker logs pharmacy-db` is easy to type
+    environment:                # read by the image on first start to create the superuser and DB
+      POSTGRES_USER: pharmacy
+      POSTGRES_PASSWORD: pharmacy
+      POSTGRES_DB: pharmacy     # the development database
+    ports:
+      - "5432:5432"             # host port 5432 -> container port 5432, so the app on your machine can connect
+    volumes:
+      - pgdata:/var/lib/postgresql/data              # named volume: data survives `docker compose down`
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+                                # scripts in initdb.d run once on first start; this one creates pharmacy_test
+    healthcheck:                # lets `docker compose ps` (and `depends_on`) know when Postgres accepts connections
+      test: ["CMD-SHELL", "pg_isready -U pharmacy -d pharmacy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:                       # declares the named volume used above
